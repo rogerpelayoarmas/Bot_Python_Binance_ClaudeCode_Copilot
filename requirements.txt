@@ -1,0 +1,9 @@
+requests
+pandas
+matplotlib
+pymongo
+google-cloud-bigquery
+db-dtypes
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
