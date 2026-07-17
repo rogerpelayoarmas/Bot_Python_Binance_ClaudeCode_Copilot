@@ -889,7 +889,13 @@ class TradingBotApp(tk.Tk):
             relief="flat", bd=0, font=("Segoe UI", 9, "bold"),
             padx=10, pady=8, cursor="hand2",
             command=self._open_trade_modal,
-        ).pack()
+        ).pack(side="left")
+        tk.Button(
+            trade_f, text="CLOSE ORDER", bg="#d9534f", fg=TEXT_WHITE,
+            activebackground="#b52f2a", activeforeground=TEXT_WHITE,
+            relief="flat", bd=0, font=("Segoe UI", 9, "bold"),
+            padx=10, pady=8, cursor="hand2",
+        ).pack(side="left", padx=(8, 0))
 
     def _open_trade_modal(self):
         if hasattr(self, "_trade_modal") and self._trade_modal.winfo_exists():
@@ -946,7 +952,7 @@ class TradingBotApp(tk.Tk):
 
             btn_bar = tk.Frame(container, bg=BG_PANEL)
             btn_bar.pack(fill="x")
-            for side in ["Buy", "Sell"]:
+            for side in ["Bugit y", "Sell"]:
                 tk.Button(
                     btn_bar, text=side, bg=ACCENT_BLUE, fg=TEXT_WHITE,
                     activebackground="#1060a0", activeforeground=TEXT_WHITE,
