@@ -1,0 +1,14 @@
+{
+  "pending_trade": null,
+  "history": [
+    {
+      "side": "Buy",
+      "entry_price": 63932.01,
+      "close_price": 63934.2,
+      "result": "ganancia",
+      "profit": 2.19,
+      "new_balance": 101522.19,
+      "timestamp": "2026-07-17T22:05:58"
+    }
+  ]
+}

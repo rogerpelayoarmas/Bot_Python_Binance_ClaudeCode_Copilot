@@ -14,10 +14,12 @@ Novedades v3:
 """
 
 import logging
+import json
 import tkinter as tk
 import threading
 import time
 import queue
+from pathlib import Path
 from datetime import datetime
 
 import requests
@@ -77,6 +79,7 @@ CANDLE_UP   = "#00c896"
 CANDLE_DOWN = "#e84040"
 MPL_BG      = "#0a0c12"
 MPL_GRID    = "#1e2436"
+TRADE_STATE_FILE = Path(__file__).resolve().parent / "trade_state.json"
 
 # ── Demo data ──────────────────────────────────────────────────
 ORDERS_DEMO = [
@@ -100,6 +103,124 @@ def _format_value(value):
             return f"{int(value):,}"
         return f"{value:,.2f}".rstrip("0").rstrip(".")
     return str(value).strip()
+
+
+def _load_trade_state():
+    if not TRADE_STATE_FILE.exists():
+        return {"pending_trade": None, "history": []}
+    try:
+        with open(TRADE_STATE_FILE, "r", encoding="utf-8") as handle:
+            state = json.load(handle)
+            if not isinstance(state, dict):
+                return {"pending_trade": None, "history": []}
+            state.setdefault("pending_trade", None)
+            state.setdefault("history", [])
+            return state
+    except Exception as exc:
+        logger.warning("No se pudo cargar %s: %s", TRADE_STATE_FILE, exc)
+        return {"pending_trade": None, "history": []}
+
+
+def _save_trade_state(state: dict):
+    try:
+        with open(TRADE_STATE_FILE, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        logger.warning("No se pudo guardar %s: %s", TRADE_STATE_FILE, exc)
+
+
+def get_current_market_price(symbol: str = SYMBOL, interval: str = "1m"):
+    try:
+        response = requests.get(
+            BINANCE_KLINES,
+            params={"symbol": symbol, "interval": interval, "limit": 1},
+            timeout=8,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload:
+            return None
+        return float(payload[0][4])
+    except Exception as exc:
+        logger.warning("No se pudo obtener el precio actual del mercado: %s", exc)
+        return None
+
+
+def _coerce_numeric(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace("$", "").replace(",", "")
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def _get_last_bot_balance():
+    if MongoClient is None:
+        return None
+    client = None
+    try:
+        client = MongoClient("mongodb://127.0.0.1:27017/", serverSelectionTimeoutMS=1500)
+        db = client["Damian"]
+        available_collections = db.list_collection_names()
+        collection = None
+        for candidate in ["BotBalance", "botbalance", "botBalance"]:
+            if candidate in available_collections:
+                collection = db[candidate]
+                break
+        if collection is None:
+            return None
+        doc = collection.find_one({}, sort=[("_id", -1)])
+        if not doc:
+            return None
+        balance = _coerce_numeric(doc.get("Balance"))
+        return balance if balance is not None else None
+    except Exception as exc:
+        logger.warning("No se pudo leer el último balance de MongoDB: %s", exc)
+        return None
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def _save_trade_result_to_mongodb(side: str, profit: float, balance: float):
+    if MongoClient is None:
+        logger.info("pymongo no disponible, no se pudo guardar la operación en MongoDB")
+        return False
+    client = None
+    try:
+        client = MongoClient("mongodb://127.0.0.1:27017/", serverSelectionTimeoutMS=1500)
+        db = client["Damian"]
+        available_collections = db.list_collection_names()
+        collection = None
+        for candidate in ["BotBalance", "botbalance", "botBalance"]:
+            if candidate in available_collections:
+                collection = db[candidate]
+                break
+        if collection is None:
+            logger.warning("La colección BotBalance no existe en MongoDB")
+            return False
+        collection.insert_one({
+            "Order Type": side,
+            "Profit": profit,
+            "Balance": balance,
+        })
+        return True
+    except Exception as exc:
+        logger.warning("No se pudo insertar el cierre de orden en MongoDB: %s", exc)
+        return False
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 def _read_mongo_documents(collection_name: str, projection: dict):
@@ -884,6 +1005,7 @@ class TradingBotApp(tk.Tk):
             activebackground="#b52f2a", activeforeground=TEXT_WHITE,
             relief="flat", bd=0, font=("Segoe UI", 9, "bold"),
             padx=10, pady=8, cursor="hand2",
+            command=self._close_order_action,
         ).pack(side="left", padx=(8, 0))
 
     def _open_trade_modal(self):
@@ -977,7 +1099,18 @@ class TradingBotApp(tk.Tk):
 
     def _place_trade_action(self, option: str, side, fields: dict):
         if option == "market":
-            self.status_var.set(f"✓ Market {side} seleccionado")
+            price = get_current_market_price()
+            if price is None:
+                self.status_var.set("⚠ No se pudo obtener el precio del mercado")
+            else:
+                state = _load_trade_state()
+                state["pending_trade"] = {
+                    "side": side,
+                    "entry_price": round(price, 2),
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                }
+                _save_trade_state(state)
+                self.status_var.set(f"✓ Market {side} registrado a ${price:,.2f}")
         else:
             price = fields.get("Price").get().strip()
             stop_loss = fields.get("Stop Loss").get().strip()
@@ -987,6 +1120,62 @@ class TradingBotApp(tk.Tk):
             )
         if hasattr(self, "_trade_modal") and self._trade_modal.winfo_exists():
             self._trade_modal.destroy()
+
+    def _close_order_action(self):
+        state = _load_trade_state()
+        pending_trade = state.get("pending_trade")
+        if not pending_trade:
+            self.status_var.set("⚠ No hay una orden abierta para cerrar")
+            return
+
+        close_price = get_current_market_price()
+        if close_price is None:
+            self.status_var.set("⚠ No se pudo obtener el precio del mercado al cerrar")
+            return
+
+        entry_price = float(pending_trade.get("entry_price", 0.0))
+        side = pending_trade.get("side", "Buy")
+
+        if side == "Buy":
+            if close_price > entry_price:
+                profit = close_price - entry_price
+                outcome = "ganancia"
+            else:
+                profit = entry_price - close_price
+                outcome = "pérdida"
+        else:
+            if close_price < entry_price:
+                profit = entry_price - close_price
+                outcome = "ganancia"
+            else:
+                profit = close_price - entry_price
+                outcome = "pérdida"
+
+        last_balance = _get_last_bot_balance()
+        if last_balance is None:
+            last_balance = 0.0
+        new_balance = last_balance + profit if outcome == "ganancia" else last_balance - profit
+
+        saved = _save_trade_result_to_mongodb(side, profit if outcome == "ganancia" else -profit, new_balance)
+        if saved:
+            global ORDERS
+            ORDERS.append((side, f"{profit if outcome == 'ganancia' else -profit:+.2f}$", f"{new_balance:,.2f}"))
+            state["history"].append({
+                "side": side,
+                "entry_price": round(entry_price, 2),
+                "close_price": round(close_price, 2),
+                "result": outcome,
+                "profit": round(profit if outcome == "ganancia" else -profit, 2),
+                "new_balance": round(new_balance, 2),
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+            })
+            state["pending_trade"] = None
+            _save_trade_state(state)
+            self.status_var.set(
+                f"✓ Cierre {side} | Precio cierre=${close_price:,.2f} | {outcome.title()} ${profit:,.2f} | Balance ${new_balance:,.2f}"
+            )
+        else:
+            self.status_var.set("⚠ No se pudo guardar el cierre en MongoDB")
 
     def _on_interval_change(self):
         self.ax.cla()
