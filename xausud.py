@@ -42,11 +42,6 @@ try:
 except Exception:
     MongoClient = None
 
-try:
-    from seed_mongo import seed_demo_data
-except Exception:
-    seed_demo_data = None
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
@@ -212,13 +207,7 @@ def _update_data_source_message(orders_loaded_from_mongo: bool, accounts_loaded_
     )
 
 
-def _initialize_mongo_demo_data():
-    if seed_demo_data is not None:
-        try:
-            seed_demo_data()
-        except Exception as exc:
-            logger.warning("No se pudieron inicializar los datos demo en MongoDB: %s", exc)
-
+def _initialize_mongo_data():
     global ORDERS, ACCOUNTS
     orders, orders_loaded_from_mongo = load_orders_from_mongodb()
     accounts, accounts_loaded_from_mongo = load_accounts_from_mongodb()
@@ -234,7 +223,7 @@ STATS = [
     ("MONTH", "7,820",  "950",   "6,870"),
     ("YEAR",  "64,020", "2,550", "61,470"),
 ]
-ORDERS, ACCOUNTS = _initialize_mongo_demo_data()
+ORDERS, ACCOUNTS = _initialize_mongo_data()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -340,7 +329,7 @@ class TradingBotApp(tk.Tk):
         self._pct_label   = None   # se asigna en _top_bar
         self.symbol_info  = None
 
-        _initialize_mongo_demo_data()
+        _initialize_mongo_data()
         self.data_source_var.set(DATA_SOURCE_MESSAGE)
         self._build_ui()
         self._validate_symbol()
@@ -952,7 +941,7 @@ class TradingBotApp(tk.Tk):
 
             btn_bar = tk.Frame(container, bg=BG_PANEL)
             btn_bar.pack(fill="x")
-            for side in ["Bugit y", "Sell"]:
+            for side in ["Buy", "Sell"]:
                 tk.Button(
                     btn_bar, text=side, bg=ACCENT_BLUE, fg=TEXT_WHITE,
                     activebackground="#1060a0", activeforeground=TEXT_WHITE,
