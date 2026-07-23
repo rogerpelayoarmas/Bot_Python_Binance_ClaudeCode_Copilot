@@ -36,6 +36,24 @@
       "profit": -25.99,
       "new_balance": 101590.55,
       "timestamp": "2026-07-23T09:59:55"
+    },
+    {
+      "side": "Buy",
+      "entry_price": 65062.86,
+      "close_price": 65107.24,
+      "result": "ganancia",
+      "profit": 44.38,
+      "new_balance": 101634.93,
+      "timestamp": "2026-07-23T10:21:13"
+    },
+    {
+      "side": "Sell",
+      "entry_price": 65166.01,
+      "close_price": 65142.98,
+      "result": "ganancia",
+      "profit": 23.03,
+      "new_balance": 101657.96,
+      "timestamp": "2026-07-23T10:26:18"
     }
   ]
 }

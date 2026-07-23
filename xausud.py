@@ -604,6 +604,9 @@ class TradingBotApp(tk.Tk):
 
         inner = tk.Frame(cvs, bg=BG_PANEL)
         win_id = cvs.create_window((0, 0), window=inner, anchor="nw")
+        self._orders_canvas = cvs
+        self._orders_inner = inner
+        self._orders_win_id = win_id
 
         def _on_inner_configure(e):
             cvs.configure(scrollregion=cvs.bbox("all"))
@@ -613,25 +616,37 @@ class TradingBotApp(tk.Tk):
         inner.bind("<Configure>", _on_inner_configure)
         cvs.bind("<Configure>",  _on_canvas_configure)
 
+        self._refresh_orders_panel()
+
+        # Scroll con rueda del ratón
+        def _mousewheel(e):
+            cvs.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        cvs.bind_all("<MouseWheel>", _mousewheel)
+
+    def _refresh_orders_panel(self):
+        if not hasattr(self, "_orders_inner"):
+            return
+
+        for child in self._orders_inner.winfo_children():
+            child.destroy()
+
         for i, (ot, pr, bal) in enumerate(ORDERS):
-            rbg   = BG_ROW_ALT if i % 2 == 0 else BG_PANEL
-            fc    = RED if pr.startswith("-") else TEXT_WHITE
-            row   = tk.Frame(inner, bg=rbg)
+            rbg = BG_ROW_ALT if i % 2 == 0 else BG_PANEL
+            fc = RED if pr.startswith("-") else TEXT_WHITE
+            row = tk.Frame(self._orders_inner, bg=rbg)
             row.pack(fill="x")
-            tk.Label(row, text=ot,  bg=rbg, fg=TEXT_WHITE,
+            tk.Label(row, text=ot, bg=rbg, fg=TEXT_WHITE,
                      font=("Segoe UI", 7), anchor="w",
                      padx=4, pady=3, width=8).pack(side="left")
-            tk.Label(row, text=pr,  bg=rbg, fg=fc,
+            tk.Label(row, text=pr, bg=rbg, fg=fc,
                      font=("Segoe UI", 7), anchor="w",
                      padx=2, pady=3, width=6).pack(side="left")
             tk.Label(row, text=bal, bg=rbg, fg=TEXT_GRAY,
                      font=("Segoe UI", 7), anchor="w",
                      padx=2, pady=3, width=9).pack(side="left")
 
-        # Scroll con rueda del ratón
-        def _mousewheel(e):
-            cvs.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        cvs.bind_all("<MouseWheel>", _mousewheel)
+        self._orders_canvas.update_idletasks()
+        self._orders_canvas.configure(scrollregion=self._orders_canvas.bbox("all"))
 
     # ── Panel central — Gráfico Matplotlib ──────────────────────
     def _center_panel(self, parent):
@@ -851,8 +866,9 @@ class TradingBotApp(tk.Tk):
                  fg=TEXT_WHITE, font=("Segoe UI", 8)).pack(anchor="w")
         tk.Label(info, text="Balance:", bg=BG_CARD, fg=RED,
                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        tk.Label(info, text="61,470", bg=BG_CARD, fg=TEXT_WHITE,
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        self.balance_label = tk.Label(info, text=f"{_get_last_bot_balance() or 0:,.0f}", bg=BG_CARD, fg=TEXT_WHITE,
+                                       font=("Segoe UI", 10, "bold"))
+        self.balance_label.pack(anchor="w")
 
     def _stats_table(self, parent):
         frame = tk.Frame(parent, bg=BG_CARD)
@@ -1156,8 +1172,18 @@ class TradingBotApp(tk.Tk):
 
         saved = _save_trade_result_to_mongodb(side, profit if outcome == "ganancia" else -profit, new_balance)
         if saved:
+            latest_balance = _get_last_bot_balance()
+            if latest_balance is not None:
+                new_balance = latest_balance
+
             global ORDERS
-            ORDERS.append((side, f"{profit if outcome == 'ganancia' else -profit:+.2f}$", f"{new_balance:,.2f}"))
+            refreshed_orders, _ = load_orders_from_mongodb()
+            if refreshed_orders:
+                ORDERS = refreshed_orders
+
+            if hasattr(self, "balance_label"):
+                self.balance_label.config(text=f"{new_balance:,.0f}")
+
             state["history"].append({
                 "side": side,
                 "entry_price": round(entry_price, 2),
@@ -1169,6 +1195,8 @@ class TradingBotApp(tk.Tk):
             })
             state["pending_trade"] = None
             _save_trade_state(state)
+            self._refresh_orders_panel()
+            self.data_source_var.set("Datos cargados desde MongoDB")
             self.status_var.set(
                 f"✓ Cierre {side} | Precio cierre=${close_price:,.2f} | {outcome.title()} ${profit:,.2f} | Balance ${new_balance:,.2f}"
             )
