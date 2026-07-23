@@ -1138,18 +1138,16 @@ class TradingBotApp(tk.Tk):
 
         if side == "Buy":
             if close_price > entry_price:
-                profit = close_price - entry_price
                 outcome = "ganancia"
             else:
-                profit = entry_price - close_price
                 outcome = "pérdida"
         else:
             if close_price < entry_price:
-                profit = entry_price - close_price
                 outcome = "ganancia"
             else:
-                profit = close_price - entry_price
                 outcome = "pérdida"
+
+        profit = abs(close_price - entry_price)
 
         last_balance = _get_last_bot_balance()
         if last_balance is None:
